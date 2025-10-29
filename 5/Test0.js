@@ -242,6 +242,10 @@ app.delete("/projects/:id", async (req,res)=>{
 
 })
 
+//link with innerJoin and leftJoin
+
+
+
 app.listen(PORT, ()=> {
     console.log("Port 3000 is ready http://localhost:3000" );
 })
