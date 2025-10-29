@@ -1,0 +1,274 @@
+// server.js
+// npm i express mysql2
+// по желанию: npm i dotenv  (и раскомментировать строки с dotenv)
+
+import express from "express";
+import mysql from "mysql2/promise";
+// import dotenv from "dotenv"; dotenv.config();
+
+const app = express();
+app.use(express.json());
+
+// --- Конфиг подключения к MySQL (поменяй при необходимости) ---
+const DB_CONFIG = {
+  host: "localhost",
+  user: "root",
+  password: "",     // <-- если есть пароль, укажи здесь
+  database: "test_db",
+};
+
+// --- Пул соединений (рекомендуется для продакшена) ---
+const pool = mysql.createPool(DB_CONFIG);
+
+// --- Авто-создание таблиц при старте ---
+async function ensureSchema() {
+  const conn = await pool.getConnection();
+  try {
+    await conn.query(`CREATE TABLE IF NOT EXISTS users (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(50) NOT NULL,
+      age INT,
+      city VARCHAR(50)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`);
+
+    await conn.query(`CREATE TABLE IF NOT EXISTS projects (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      title VARCHAR(100) NOT NULL,
+      budget INT
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`);
+
+    await conn.query(`CREATE TABLE IF NOT EXISTS user_projects (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      project_id INT NOT NULL,
+      INDEX idx_up_user (user_id),
+      INDEX idx_up_project (project_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`);
+
+    // При желании можно добавить внешние ключи (я оставил простую схему, как ты любишь)
+    console.log("✅ Schema ensured (tables created if not exist)");
+  } finally {
+    conn.release();
+  }
+}
+
+// ---------- Helpers ----------
+function notFound(res, entity = "Item") {
+  return res.status(404).json({ error: `${entity} not found` });
+}
+
+function ok(res, data) {
+  return res.json(data);
+}
+
+// ---------- Users ----------
+app.post("/users", async (req, res) => {
+  try {
+    const { name, age, city } = req.body;
+    if (!name) return res.status(400).json({ error: "name is required" });
+
+    const [r] = await pool.query(
+      "INSERT INTO users (name, age, city) VALUES (?, ?, ?)",
+      [name, age ?? null, city ?? null]
+    );
+    ok(res, { id: r.insertId, name, age, city });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Internal error" });
+  }
+});
+
+app.get("/users", async (req, res) => {
+  try {
+    const { city, minAge } = req.query;
+    const params = [];
+    let sql = "SELECT * FROM users WHERE 1=1";
+
+    if (city) { sql += " AND city = ?"; params.push(city); }
+    if (minAge) { sql += " AND age >= ?"; params.push(Number(minAge)); }
+
+    const [rows] = await pool.query(sql, params);
+    ok(res, rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Internal error" });
+  }
+});
+
+app.get("/users/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [rows] = await pool.query("SELECT * FROM users WHERE id = ?", [id]);
+    if (rows.length === 0) return notFound(res, "User");
+    ok(res, rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Internal error" });
+  }
+});
+
+app.put("/users/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { name, age, city } = req.body;
+
+    const [r] = await pool.query(
+      "UPDATE users SET name = COALESCE(?, name), age = COALESCE(?, age), city = COALESCE(?, city) WHERE id = ?",
+      [name ?? null, age ?? null, city ?? null, id]
+    );
+    if (r.affectedRows === 0) return notFound(res, "User");
+    const [rows] = await pool.query("SELECT * FROM users WHERE id = ?", [id]);
+    ok(res, rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Internal error" });
+  }
+});
+
+app.delete("/users/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [r] = await pool.query("DELETE FROM users WHERE id = ?", [id]);
+    if (r.affectedRows === 0) return notFound(res, "User");
+    ok(res, { deleted: id });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Internal error" });
+  }
+});
+
+// ---------- Projects ----------
+app.post("/projects", async (req, res) => {
+  try {
+    const { title, budget } = req.body;
+    if (!title) return res.status(400).json({ error: "title is required" });
+
+    const [r] = await pool.query(
+      "INSERT INTO projects (title, budget) VALUES (?, ?)",
+      [title, budget ?? null]
+    );
+    ok(res, { id: r.insertId, title, budget });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Internal error" });
+  }
+});
+
+app.get("/projects", async (req, res) => {
+  try {
+    const { minBudget } = req.query;
+    let sql = "SELECT * FROM projects WHERE 1=1";
+    const params = [];
+    if (minBudget) { sql += " AND budget >= ?"; params.push(Number(minBudget)); }
+    const [rows] = await pool.query(sql, params);
+    ok(res, rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Internal error" });
+  }
+});
+
+app.get("/projects/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [rows] = await pool.query("SELECT * FROM projects WHERE id = ?", [id]);
+    if (rows.length === 0) return notFound(res, "Project");
+    ok(res, rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Internal error" });
+  }
+});
+
+app.put("/projects/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { title, budget } = req.body;
+
+    const [r] = await pool.query(
+      "UPDATE projects SET title = COALESCE(?, title), budget = COALESCE(?, budget) WHERE id = ?",
+      [title ?? null, budget ?? null, id]
+    );
+    if (r.affectedRows === 0) return notFound(res, "Project");
+    const [rows] = await pool.query("SELECT * FROM projects WHERE id = ?", [id]);
+    ok(res, rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Internal error" });
+  }
+});
+
+app.delete("/projects/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [r] = await pool.query("DELETE FROM projects WHERE id = ?", [id]);
+    if (r.affectedRows === 0) return notFound(res, "Project");
+    ok(res, { deleted: id });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Internal error" });
+  }
+});
+
+// ---------- Links (user ↔ project) ----------
+app.post("/links", async (req, res) => {
+  try {
+    const { user_id, project_id } = req.body;
+    if (!user_id || !project_id) return res.status(400).json({ error: "user_id and project_id required" });
+
+    const [r] = await pool.query(
+      "INSERT INTO user_projects (user_id, project_id) VALUES (?, ?)",
+      [Number(user_id), Number(project_id)]
+    );
+    ok(res, { id: r.insertId, user_id, project_id });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Internal error" });
+  }
+});
+
+// проекты пользователя
+app.get("/users/:id/projects", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [rows] = await pool.query(`
+      SELECT p.*
+      FROM user_projects up
+      INNER JOIN projects p ON p.id = up.project_id
+      WHERE up.user_id = ?
+    `, [id]);
+    ok(res, rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Internal error" });
+  }
+});
+
+// пользователи проекта
+app.get("/projects/:id/users", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [rows] = await pool.query(`
+      SELECT u.*
+      FROM user_projects up
+      INNER JOIN users u ON u.id = up.user_id
+      WHERE up.project_id = ?
+    `, [id]);
+    ok(res, rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Internal error" });
+  }
+});
+
+// ---------- Запуск ----------
+const PORT = process.env.PORT || 3000;
+
+ensureSchema()
+  .then(() => {
+    app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+  })
+  .catch((e) => {
+    console.error("Schema ensure failed:", e);
+    process.exit(1);
+  });

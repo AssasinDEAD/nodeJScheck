@@ -1,0 +1,12 @@
+
+      Namber of chars: 58
+      
+
+      Namber of chars2: 58
+      
+
+      Number of lines: 3
+      
+
+      Number of words: 12
+      
