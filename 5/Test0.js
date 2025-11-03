@@ -244,6 +244,45 @@ app.delete("/projects/:id", async (req,res)=>{
 
 //link with innerJoin and leftJoin
 
+app.post("/links", async (req, res)=>{
+    try {
+      const {user_id, project_id} = req.body
+      if (!user_id || !project_id){
+        return res.status(400).json({error: "user_id and project_id are required"})
+      }
+
+      const [r]= await pool.query("insert into users_project (user_id, project_id) values (?, ?)", [Number(user_id), Number(project_id)])
+      allIsGood(res, {id: r.insertId, user_id: Number(user_id), project_id: Number(project_id)})
+    }catch(err){
+            console.log("Errors with data", err);
+        return res.status(500).json({ error: "Internal error", details: err.sqlMessage || String(err) }); 
+    } 
+   })
+
+
+app.get("/users/:id/projects", async (req, res)=>{
+   try{
+      const id = Number(req.params.id)
+      const [rows] = await pool.query(`select p.* from users_project up inner join projects p on p.id = up.project_id where up.user_id = ?`, [id])
+      allIsGood(res, rows)
+   }catch(err){
+            console.log("Errors with data", err);
+        return res.status(500).json({ error: "Internal error", details: err.sqlMessage || String(err) }); 
+
+   }
+})
+
+app.get("/projects/:id/users", async (req, res)=>{
+   try{
+      const id = Number(req.params.id)
+      const [rows] = await pool.query(`select u.* from users_project up inner join users u on u.id = up.user_id where up.project_id = ?`, [id])
+      allIsGood(res, rows)
+   }catch(err){
+            console.log("Errors with data", err);
+        return res.status(500).json({ error: "Internal error", details: err.sqlMessage || String(err) }); 
+   }
+})
+
 
 
 app.listen(PORT, ()=> {
